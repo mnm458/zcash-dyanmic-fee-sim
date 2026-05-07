@@ -1,0 +1,48 @@
+name: fast_lane_flap
+
+num_blocks: 400
+random_seed: 42
+
+chain:
+  block_action_cap: 200
+  block_byte_cap: 2000000
+
+zip317:
+  marginal_fee: 5000
+
+controller:
+  type: BinaryFastLaneController
+  base_fee: 5000
+  fast_lane_multiplier: 10
+  open_threshold: 0.95
+  close_threshold: 0.95
+  use_hysteresis: false
+  synthetic_actions_per_block: 100
+  block_action_cap: 200
+
+block_builder:
+  mode: highest_fee_per_action
+
+synthetic:
+  enabled: true
+  actions_per_block: 100
+  fee_per_action: 5000
+  granularity_mode: granular
+  tx_granularity_actions: 1
+
+honest_demand:
+  arrival_rate: 20
+  mean_actions: 3
+  expiry_blocks: 40
+
+attacker:
+  enabled: true
+  type: FastLaneFlapAttacker
+  start_height: 50
+  end_height: 350
+  actions_per_block: 90
+  target_fee_multiplier: 1
+  expiry_blocks: 2
+
+metrics:
+  output_csv: results/fast_lane_flap.csv
