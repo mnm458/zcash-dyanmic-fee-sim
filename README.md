@@ -1,13 +1,13 @@
-# zfeesim — Zcash Dynamic Fee Simulator
+# zfeesim: Zcash Dynamic Fee Simulator
 
-Block-level economic simulator for evaluating Zcash dynamic fee-market designs under honest and adversarial demand. The headline metric is `harm_ratio = honest_overpayment / attacker_cost`.
+Block-level economic simulator for evaluating Zcash dynamic fee-market designs under honest and adversarial demand. The headline metric is `harm_ratio = incremental_overpayment / attacker_cost`: how much extra harm each ZEC of attacker spending causes to honest users, compared to a no-attack baseline.
 
 ## Setup
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest  # 68 tests, ~20s
+pytest  # 203 tests, ~6min
 ```
 
 ## CLI Commands
@@ -39,13 +39,27 @@ python -m zfeesim.runner audit
 
 All outputs go to `results/` (CSV per-block, JSON summary, markdown reports).
 
+## Key Scenarios
+
+```bash
+python -m zfeesim.runner --scenario experiments/burst_spam_persistence.yaml
+python -m zfeesim.runner --scenario experiments/fast_lane_flap.yaml
+python -m zfeesim.runner --scenario experiments/low_volume_median_poisoning.yaml
+```
+
+| Scenario | Attack | harm_ratio | Finding |
+|----------|--------|-----------|---------|
+| Burst spam | 500 act/blk, 10x, 10 blocks | 0.0 | Synthetic anchoring fully absorbs the burst; zero incremental harm |
+| Fast-lane griefing | 90 act/blk, 1x, 300 blocks | 0.05 | Granular synthetic prevents displacement; fast lane stays closed |
+| Median poisoning | 300 act/blk, 10x, 80 blocks | 0.04 | Attacker spends 25x more than the harm caused |
+
 ## Experiments
 
 | File | Attack | Controller | Tests |
 |------|--------|-----------|-------|
-| `low_volume_median_poisoning.yaml` | MedianPoisoning, 300 act/blk, 10x | ComparableMedian, action-weighted | Oracle manipulation under low demand |
 | `burst_spam_persistence.yaml` | BurstSpam, 500 act/blk, 10x, 10 blocks | ComparableMedian | Fee persistence after short burst |
 | `fast_lane_flap.yaml` | FastLaneFlap, 90 act/blk | BinaryFastLane, threshold=0.95 | Fast-lane instability near threshold |
+| `low_volume_median_poisoning.yaml` | MedianPoisoning, 300 act/blk, 10x | ComparableMedian, action-weighted | Oracle manipulation under low demand |
 | `hysteresis_compare.yaml` | BucketNudging, 50 act/blk, 1.5x | ComparableMedianHysteresis | Bucket stability under nudging |
 | `aimd_compare.yaml` | BurstSpam, 300 act/blk, 5x | AIMD | Smooth fee response to burst |
 | `miner_self_dealing.yaml` | MinerSelfDealing, 200 act/blk, 5x | ComparableMedian | Oracle contamination via wash fees |
@@ -62,17 +76,41 @@ All outputs go to `results/` (CSV per-block, JSON summary, markdown reports).
 | `ComparableMedianHysteresisController` | Requires N consecutive blocks above/below threshold before bucket change |
 | `BinaryFastLaneController` | 1x/10x fee based on synthetic displacement ratio |
 | `PriorityBucketController` | Graduated 1x/2x/5x/10x instead of binary |
-| `AIMDBucketController` | Additive increase / multiplicative decrease on internal multiplier |
+| `AIMDBucketController` | Additive increase / multiplicative decrease on internal multiplier; excludes synthetic from utilization |
 | `AIMDWithHysteresisController` | AIMD + hysteresis on the quantized output |
 
 ### Oracle Variants
 
+All oracle variants respect `oracle_include_synthetic` (default: `true`). When enabled, synthetic transactions participate in the median as low-fee anchors.
+
 | Oracle | Weight | Sybil resistance |
 |--------|--------|-----------------|
-| `transaction_weighted_median` | 1 per tx | Low — splitting is free |
-| `action_weighted_median` | logical_actions per tx | Medium — splitting costs proportional actions |
-| `capped_effective_fee_median` | logical_actions, fee capped at 4x conventional | High — extreme overpayment doesn't move oracle |
-| `byte_share_weighted_median` | byte_size per tx | Medium — weights by capacity consumed |
+| `transaction_weighted_median` | 1 per tx | Low: splitting is free |
+| `action_weighted_median` | logical_actions per tx | Medium: splitting costs proportional actions |
+| `capped_effective_fee_median` | logical_actions, fee capped at 4x conventional | High: extreme overpayment doesn't move oracle |
+| `byte_share_weighted_median` | byte_size per tx | Medium: weights by capacity consumed |
+
+### Quantization
+
+`quantize_power_of_10` uses `floor(log10(x))`: the fee bucket is the largest power of 10 that does not exceed the raw oracle fee. The controller's `floor_fee` (default 5000) prevents the bucket from dropping below baseline.
+
+| Raw oracle fee | Quantized bucket | After floor_fee=5000 |
+|---------------|-----------------|---------------------|
+| 5000 | 1000 | 5000 |
+| 9999 | 1000 | 5000 |
+| 10000 | 10000 | 10000 |
+| 50000 | 10000 | 10000 |
+| 100000 | 100000 | 100000 |
+
+### Synthetic Demand
+
+Synthetic transactions model unused block capacity as low-fee comparables. Default mode is **granular** (100 individual 1-action txs per block) which allows partial inclusion and continuous displacement ratios.
+
+| Config | Meaning |
+|--------|---------|
+| `granularity_mode: granular` | Many small txs; partial fill of remaining capacity (default) |
+| `granularity_mode: atomic` | One large tx; all-or-nothing inclusion (legacy, for comparison only) |
+| `tx_granularity_actions: 1` | Actions per synthetic tx (default 1) |
 
 ### Block Builders
 
@@ -123,6 +161,7 @@ controller:
   lookback: 50
   reorg_buffer: 5
   oracle: action_weighted_median
+  oracle_include_synthetic: true
   quantization: power_of_10
   base_fee: 5000
   floor_fee: 5000
@@ -134,6 +173,8 @@ synthetic:
   enabled: true
   actions_per_block: 100
   fee_per_action: 5000
+  granularity_mode: granular
+  tx_granularity_actions: 1
 
 honest_demand:
   arrival_rate: 30
@@ -159,13 +200,15 @@ attacker:
 
 | Metric | Formula |
 |--------|---------|
-| `harm_ratio` | `honest_overpayment / effective_attacker_cost` |
+| `harm_ratio` | `incremental_overpayment / effective_attacker_cost` |
+| `incremental_overpayment` | `honest_overpayment - baseline_overpayment` |
+| `baseline_overpayment` | Honest overpayment from a shadow no-attacker run with the same config |
 | `effective_attacker_cost` | `attacker_nominal + miner_nominal - miner_recovered` |
 | `honest_overpayment` | `honest_total_fee - honest_zip317_baseline_fee` |
 
 ### Cost Breakdown (zats and ZEC)
 
-`attacker_nominal_fee_paid`, `miner_self_nominal_fee_paid`, `miner_recovered_fee`, `effective_attacker_cost`, `effective_attacker_cost_zec`, `honest_total_fee`, `honest_total_fee_zec`, `honest_overpayment_zec`
+`attacker_nominal_fee_paid`, `miner_self_nominal_fee_paid`, `miner_recovered_fee`, `effective_attacker_cost`, `effective_attacker_cost_zec`, `honest_total_fee`, `honest_total_fee_zec`, `honest_overpayment_zec`, `baseline_overpayment`, `incremental_overpayment`, `incremental_overpayment_zec`
 
 ### Fee Dynamics
 
@@ -183,6 +226,10 @@ attacker:
 
 `synthetic_displacement_ratio_avg`
 
+### Oracle Sample (per-block)
+
+`honest_actions_in_oracle`, `attacker_actions_in_oracle`, `synthetic_actions_in_oracle`, `miner_self_actions_in_oracle`, `total_actions_in_oracle`
+
 ### Per-wallet
 
 `wallet_policy_fees`, `wallet_policy_delays` (median/mean/count per wallet type)
@@ -195,41 +242,22 @@ attacker:
 | `test_oracle.py` | 6 | Weighted median, oracle variants, quantization, capping |
 | `test_block_builder.py` | 5 | Selection modes, action/byte cap enforcement |
 | `test_controllers.py` | 5 | Fixed, median, hysteresis, AIMD, fast lane controllers |
-| `test_adversarial_scenarios.py` | 16 | All spec hypothesis tests (1–16) |
+| `test_adversarial_scenarios.py` | 16 | All spec hypothesis tests (1-16) |
 | `test_sanity.py` | 14 | Unit scales, ZEC conversion, cost split, congestion delays |
 | `test_adversarial_opt.py` | 7 | Grid search, optimizer runs, defense probe validation |
 | `test_audit.py` | 8 | harm_ratio formula, cost isolation, AIMD usability |
-
-### What each hypothesis test validates
-
-| # | Test | Validates |
-|---|------|----------|
-| 1 | No congestion fixed ZIP-317 | Baseline: low demand, instant confirmation, no harm |
-| 2 | Demand above capacity | Mempool growth, confirmation delays, expiry |
-| 3 | Higher fee confirms faster | Fee sorting prioritizes urgent wallets |
-| 4 | Weight ratio cap | 100x overpayment gives 4x priority, not 100x |
-| 5 | Tx-weighted sybil sensitivity | Splitting txs cheaply moves tx-weighted median |
-| 6 | Action-weighted sybil resistance | Action-weighted harder to manipulate |
-| 7 | Capped oracle reduces poisoning | Cap limits extreme overpayment influence |
-| 8 | Burst spam persistence | Lookback lag keeps fees elevated post-attack |
-| 9 | Boundary nudging causes jumps | Small cost, large bucket jump without hysteresis |
-| 10 | Hysteresis reduces flapping | Fewer jumps than without hysteresis |
-| 11 | Binary fast lane flaps | Threshold instability near 0.95 |
-| 12 | Fast-lane hysteresis helps | Fewer flaps with separate open/close thresholds |
-| 13 | Priority buckets reduce cliff | Graduated 1/2/5/10x cheaper than binary 1/10x |
-| 14 | AIMD smooths fees | Lower volatility than direct median |
-| 15 | Miner self-dealing poisons oracle | Wash fees inflate future honest fees |
-| 16 | Synthetic excluded from harm | Synthetic txs don't count as honest overpayment |
+| `test_synthetic_oracle.py` | 6 | Synthetic inclusion/exclusion in oracle, burst anchoring |
+| `test_synthetic_granularity.py` | 7 | Granular vs atomic synthetic, continuous displacement |
+| `test_scenario_audit.py` | 25+ | Per-block trace verification for all three key scenarios |
+| `test_comprehensive_audit.py` | 97 | Full regression suite: quantization, wallet fees, oracle composition |
 
 ## Interpreting Results
 
-`harm_ratio < 1` — attacker pays more than the harm caused. Mechanism is resilient.
+`harm_ratio < 1`: attacker pays more than the incremental harm caused. Mechanism is resilient.
 
-`harm_ratio > 1` — attacker externalizes cost onto honest users. Mechanism is fragile under this attack.
+`harm_ratio > 1`: attacker externalizes cost onto honest users. Mechanism is fragile under this attack.
 
-`harm_ratio >> 1` — cheap attack, expensive harm. Serious design concern.
-
-To check whether a defense mitigates an attack, run `adversarial` and look at the defense survival table. An attack that survives 0/4 defenses is well-handled. An attack that survives 4/4 is a fundamental vulnerability.
+`harm_ratio = 0`: attack causes zero incremental overpayment beyond what the mechanism produces without any attacker.
 
 ## Unit Reference
 
