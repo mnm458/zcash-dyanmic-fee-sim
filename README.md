@@ -47,12 +47,6 @@ python -m zfeesim.runner --scenario experiments/fast_lane_flap.yaml
 python -m zfeesim.runner --scenario experiments/low_volume_median_poisoning.yaml
 ```
 
-| Scenario | Attack | harm_ratio | Finding |
-|----------|--------|-----------|---------|
-| Burst spam | 500 act/blk, 10x, 10 blocks | 0.0 | Synthetic anchoring fully absorbs the burst; zero incremental harm |
-| Fast-lane griefing | 90 act/blk, 1x, 300 blocks | 0.05 | Granular synthetic prevents displacement; fast lane stays closed |
-| Median poisoning | 300 act/blk, 10x, 80 blocks | 0.04 | Attacker spends 25x more than the harm caused |
-
 ## Experiments
 
 | File | Attack | Controller | Tests |
