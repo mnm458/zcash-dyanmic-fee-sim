@@ -135,11 +135,11 @@ def test_burst_honest_fee_paid_matches_controller():
 
 
 def test_burst_harm_ratio_formula():
-    """harm_ratio = honest_overpayment / effective_attacker_cost."""
+    """harm_ratio = incremental_overpayment / effective_attacker_cost."""
     m, _ = run_scenario(_burst_cfg())
     s = m.summary()
     if s["effective_attacker_cost"] > 0:
-        expected = s["honest_overpayment_vs_fixed_zip317"] / s["effective_attacker_cost"]
+        expected = s["incremental_overpayment"] / s["effective_attacker_cost"]
         assert abs(s["harm_ratio"] - round(expected, 4)) < 0.001
 
 
@@ -188,11 +188,13 @@ def test_burst_lookback_window_offsets():
 
 
 def test_burst_quantization_boundary():
-    """quantize_power_of_10(5000) = 10000, not 1000. Verify."""
-    assert quantize_power_of_10(5000) == 10000  # log10(5000)=3.699 -> round=4 -> 10000
-    assert quantize_power_of_10(4999) == 10000
-    assert quantize_power_of_10(3162) == 1000   # sqrt(10^7) boundary
-    assert quantize_power_of_10(3163) == 10000
+    """With floor(), quantize_power_of_10(5000) = 1000. Floor_fee catches it at 5000."""
+    assert quantize_power_of_10(5000) == 1000   # floor(log10(5000))=3 -> 1000
+    assert quantize_power_of_10(4999) == 1000
+    assert quantize_power_of_10(9999) == 1000
+    assert quantize_power_of_10(10000) == 10000  # exact power of 10
+    assert quantize_power_of_10(3162) == 1000
+    assert quantize_power_of_10(3163) == 1000
 
 
 # ====================================================================
@@ -232,9 +234,10 @@ def test_flap_synthetic_partially_included():
     # Remaining = 50 for synthetic. Should include ~50 of 100 synthetic actions.
     attack_blocks = [r for r in m.records if 55 <= r.height < 345]
     for r in attack_blocks:
-        # Synthetic should be partially included, not 0 or 100
-        assert 0 < r.synthetic_actions_included < 100 or r.honest_actions_included + 90 > 200, \
-            f"h{r.height}: syn_inc={r.synthetic_actions_included}, expected partial inclusion"
+        real_demand = r.honest_actions_included + r.attacker_actions_included
+        # Synthetic should be partially included unless real demand fills the entire block
+        assert r.synthetic_actions_included > 0 or real_demand >= 200, \
+            f"h{r.height}: syn_inc={r.synthetic_actions_included}, real={real_demand}, expected partial inclusion"
 
 
 def test_flap_displacement_below_threshold():

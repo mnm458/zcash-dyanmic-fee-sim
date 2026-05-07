@@ -136,7 +136,7 @@ def oracle_sample_breakdown(blocks: list[Block],
 def quantize_power_of_10(raw_fee: float) -> int:
     if raw_fee <= 0:
         return 0
-    exponent = round(math.log10(raw_fee))
+    exponent = math.floor(math.log10(raw_fee))
     return int(10 ** exponent)
 
 

@@ -24,12 +24,12 @@ def _attack_cfg(atk_type: str, **kw) -> dict:
 # ---- Item 2: harm_ratio formula ----
 
 def test_harm_ratio_formula():
-    """harm_ratio must equal honest_overpayment / effective_attacker_cost."""
+    """harm_ratio must equal incremental_overpayment / effective_attacker_cost."""
     cfg = _attack_cfg("BurstSpamAttacker", actions_per_block=200, target_fee_multiplier=5)
     m, _ = run_scenario(cfg)
     s = m.summary()
     if s["effective_attacker_cost"] > 0:
-        expected = s["honest_overpayment_vs_fixed_zip317"] / s["effective_attacker_cost"]
+        expected = s["incremental_overpayment"] / s["effective_attacker_cost"]
         assert abs(s["harm_ratio"] - round(expected, 4)) < 0.001, \
             f"harm_ratio {s['harm_ratio']} != computed {expected:.4f}"
 

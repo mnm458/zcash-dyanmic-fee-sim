@@ -45,10 +45,12 @@ class HeightRecord:
 class MetricsCollector:
     def __init__(self, zip317_marginal_fee: int = 5000,
                  synthetic_actions_per_block: int = 100,
-                 miner_fee_recovery_rate: float = 0.0) -> None:
+                 miner_fee_recovery_rate: float = 0.0,
+                 baseline_overpayment: int = 0) -> None:
         self.zip317_fee = zip317_marginal_fee
         self.synthetic_per_block = synthetic_actions_per_block
         self.miner_recovery_rate = miner_fee_recovery_rate
+        self._baseline_overpayment = baseline_overpayment
         self.records: list[HeightRecord] = []
         self._honest_confirmation_delays: list[int] = []
         self._attacker_nominal_fee: int = 0
@@ -139,14 +141,20 @@ class MetricsCollector:
     def honest_overpayment(self) -> int:
         return max(0, self._honest_total_fee - self._honest_zip317_fee)
 
+    @property
+    def incremental_overpayment(self) -> int:
+        """Overpayment attributable to the attacker, not baseline mechanism overhead."""
+        return max(0, self.honest_overpayment - self._baseline_overpayment)
+
     # ------------------------------------------------------------------
     # Summary
     # ------------------------------------------------------------------
 
     def summary(self) -> dict:
         overpayment = self.honest_overpayment
+        incremental = self.incremental_overpayment
         eff_cost = self.effective_attacker_cost
-        harm_ratio = overpayment / eff_cost if eff_cost > 0 else 0.0
+        harm_ratio = incremental / eff_cost if eff_cost > 0 else 0.0
 
         delays = self._honest_confirmation_delays
         if delays:
@@ -214,11 +222,14 @@ class MetricsCollector:
             # ---- honest ----
             "honest_total_fee": self._honest_total_fee,
             "honest_overpayment_vs_fixed_zip317": overpayment,
+            "baseline_overpayment": self._baseline_overpayment,
+            "incremental_overpayment": incremental,
             "harm_ratio": round(harm_ratio, 4),
 
             # ---- ZEC equivalents ----
             "effective_attacker_cost_zec": round(zats_to_zec(eff_cost), 6),
             "honest_overpayment_zec": round(zats_to_zec(overpayment), 6),
+            "incremental_overpayment_zec": round(zats_to_zec(incremental), 6),
             "honest_total_fee_zec": round(zats_to_zec(self._honest_total_fee), 6),
 
             # ---- confirmation ----

@@ -86,6 +86,7 @@ def _run_single(scenario_path: str, out_dir: str) -> None:
         "attacker_nominal_fee_paid", "miner_self_nominal_fee_paid", "miner_recovered_fee",
         "honest_total_fee", "honest_total_fee_zec",
         "honest_overpayment_vs_fixed_zip317", "honest_overpayment_zec",
+        "baseline_overpayment", "incremental_overpayment", "incremental_overpayment_zec",
         "harm_ratio", "median_confirmation_delay", "p95_confirmation_delay",
         "expired_honest_transactions", "expired_attacker_transactions",
         "raw_oracle_fee_final", "public_fee_bucket_final",

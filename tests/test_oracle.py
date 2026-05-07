@@ -48,7 +48,7 @@ def test_action_weighted_vs_transaction_weighted():
 
 
 def test_quantize_power_of_10():
-    assert quantize_power_of_10(5000) == 10000
+    assert quantize_power_of_10(5000) == 1000   # floor(log10(5000))=3 -> 1000
     assert quantize_power_of_10(3000) == 1000
     assert quantize_power_of_10(10000) == 10000
     assert quantize_power_of_10(0) == 0

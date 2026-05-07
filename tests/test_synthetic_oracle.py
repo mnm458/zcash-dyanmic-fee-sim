@@ -143,8 +143,9 @@ def test_excluded_synthetic_allows_burst_to_jump():
     metrics, _ = run_scenario(cfg)
     s = metrics.summary()
 
-    # Without anchoring, fee should have jumped
-    assert s["public_fee_bucket_final"] >= 100000, \
+    # Without synthetic anchoring, fee should have jumped above baseline 5000.
+    # With floor() quantization, 50000 fpa -> quantize to 10000 -> fee jumps.
+    assert s["public_fee_bucket_final"] >= 10000, \
         f"Fee only reached {s['public_fee_bucket_final']} — expected escalation without synthetic"
 
 

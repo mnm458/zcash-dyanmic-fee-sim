@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import random
 from typing import Any
 
@@ -66,7 +67,16 @@ def _check_block_invariants(block: Block, action_cap: int, byte_cap: int,
     assert block.marginal_fee >= 0, f"Negative marginal fee at h={block.height}"
 
 
-def run_scenario(cfg: dict[str, Any]) -> tuple[MetricsCollector, Chain]:
+def run_scenario(cfg: dict[str, Any], compute_baseline: bool = True) -> tuple[MetricsCollector, Chain]:
+    # If attacker is enabled, run a no-attacker shadow simulation first
+    # to compute the baseline overpayment for incremental harm_ratio.
+    baseline_overpayment = 0
+    if compute_baseline and cfg.get("attacker", {}).get("enabled", False):
+        cfg_no_atk = copy.deepcopy(cfg)
+        cfg_no_atk["attacker"]["enabled"] = False
+        m_base, _ = run_scenario(cfg_no_atk, compute_baseline=False)
+        baseline_overpayment = m_base.honest_overpayment
+
     seed = cfg.get("random_seed", 42)
     rng = random.Random(seed)
     reset_counter()
@@ -114,6 +124,7 @@ def run_scenario(cfg: dict[str, Any]) -> tuple[MetricsCollector, Chain]:
         zip317_marginal_fee=zip317_fee,
         synthetic_actions_per_block=synth_cfg.get("actions_per_block", 100),
         miner_fee_recovery_rate=miner_recovery,
+        baseline_overpayment=baseline_overpayment,
     )
 
     mempool = Mempool()
