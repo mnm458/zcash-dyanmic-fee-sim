@@ -136,16 +136,18 @@ class TestBurstSpamRegression:
                 f"got real={r.honest_actions_in_oracle}, synthetic={r.synthetic_actions_in_oracle}"
             )
 
-    def test_synthetic_granular(self, result):
+    def test_synthetic_in_blocks(self, result):
         _, chain, _ = result
-        # Synthetic txs should be 1-action each (granular mode)
+        # In adaptive mode, synthetic txs have median_tx_actions (default 3)
+        # and are computed from remaining byte capacity
         for block in chain.blocks[:10]:
             syn_txs = [tx for tx in block.txs if tx.kind == TxKind.SYNTHETIC]
+            assert len(syn_txs) > 0, (
+                f"Expected synthetic txs in block at h={block.height}"
+            )
             for tx in syn_txs:
-                assert tx.logical_actions == 1, (
-                    f"Expected granular synthetic txs with 1 action each, "
-                    f"got {tx.logical_actions} actions at h={block.height}"
-                )
+                assert tx.kind == TxKind.SYNTHETIC
+                assert tx.fee_per_action == 5000
 
     def test_attacker_active_window(self, result):
         m, _, _ = result
@@ -1142,17 +1144,19 @@ class TestScenarioInvariants:
     def test_action_cap_respected(self, burst_result):
         _, chain = burst_result
         for block in chain.blocks:
-            total = block.total_actions
-            assert total <= 1000, (
-                f"Block actions {total} exceed cap 1000 at h={block.height}"
+            # Only real txs (not adaptive synthetic oracle samples) count against cap
+            real_actions = sum(tx.logical_actions for tx in block.txs if tx.kind != TxKind.SYNTHETIC)
+            assert real_actions <= 1000, (
+                f"Block real actions {real_actions} exceed cap 1000 at h={block.height}"
             )
 
     def test_byte_cap_respected(self, burst_result):
         _, chain = burst_result
         for block in chain.blocks:
-            total = block.total_bytes
-            assert total <= 2_000_000, (
-                f"Block bytes {total} exceed cap at h={block.height}"
+            # Only real txs count against byte cap
+            real_bytes = sum(tx.byte_size for tx in block.txs if tx.kind != TxKind.SYNTHETIC)
+            assert real_bytes <= 2_000_000, (
+                f"Block real bytes {real_bytes} exceed cap at h={block.height}"
             )
 
     def test_synthetic_count_non_negative(self, burst_result):

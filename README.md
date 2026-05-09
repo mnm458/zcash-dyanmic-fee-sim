@@ -98,13 +98,14 @@ All oracle variants respect `oracle_include_synthetic` (default: `true`). When e
 
 ### Synthetic Demand
 
-Synthetic transactions model unused block capacity as low-fee comparables. Default mode is **granular** (100 individual 1-action txs per block) which allows partial inclusion and continuous displacement ratios.
+Synthetic samples model unused block capacity as low-fee comparables. Default mode is **adaptive** (audit-spec): after block building, compute k_i = floor(remaining_bytes / median_tx_bytes) synthetic samples at the floor fee and append them to the block for oracle computation. Synthetic never enters the mempool, is never displaced by real demand, and always participates in the per-block median.
 
 | Config | Meaning |
 |--------|---------|
-| `granularity_mode: granular` | Many small txs; partial fill of remaining capacity (default) |
-| `granularity_mode: atomic` | One large tx; all-or-nothing inclusion (legacy, for comparison only) |
-| `tx_granularity_actions: 1` | Actions per synthetic tx (default 1) |
+| `granularity_mode: adaptive` | Audit-spec: k_i = floor(remaining_bytes / median_tx_bytes). Computed after block building, never enters mempool, never displaced. (default) |
+| `granularity_mode: granular` | Many small txs injected into mempool; can be displaced by block builder (legacy, for comparison) |
+| `granularity_mode: atomic` | One large tx injected into mempool; all-or-nothing inclusion (legacy) |
+| `median_tx_actions: 3` | Actions per synthetic sample in adaptive mode (default 3) |
 
 ### Block Builders
 
@@ -165,10 +166,9 @@ block_builder:
 
 synthetic:
   enabled: true
-  actions_per_block: 100
   fee_per_action: 5000
-  granularity_mode: granular
-  tx_granularity_actions: 1
+  granularity_mode: adaptive
+  median_tx_actions: 3
 
 honest_demand:
   arrival_rate: 30

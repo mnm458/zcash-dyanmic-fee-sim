@@ -27,8 +27,9 @@ synthetic:
   enabled: true
   actions_per_block: 100
   fee_per_action: 5000
-  granularity_mode: granular
+  granularity_mode: adaptive
   tx_granularity_actions: 1
+  median_tx_actions: 3
 
 honest_demand:
   arrival_rate: 20

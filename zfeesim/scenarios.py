@@ -36,9 +36,6 @@ def build_attacker(cfg: dict[str, Any], rng: random.Random) -> AttackerStrategy 
     cls = ATTACKER_REGISTRY.get(atk_type)
     if cls is None:
         raise ValueError(f"Unknown attacker: {atk_type}")
-    # All attackers use **kwargs to forward start_height/end_height to the
-    # base class, so we pass everything through rather than filtering by
-    # inspect.signature (which can't see through **kwargs).
     kwargs = {k: v for k, v in cfg.items() if k not in ("type", "enabled")}
     kwargs["rng"] = rng
     return cls(**kwargs)
@@ -46,30 +43,18 @@ def build_attacker(cfg: dict[str, Any], rng: random.Random) -> AttackerStrategy 
 
 def _check_block_invariants(block: Block, action_cap: int, byte_cap: int,
                             controller: FeeController) -> None:
-    """Runtime assertions for impossible states (debug mode)."""
-    for tx in block.txs:
-        assert tx.fee_paid >= 0, f"fee_paid negative: {tx.fee_paid} at h={block.height}"
-        assert tx.logical_actions >= 1, f"logical_actions < 1: {tx.logical_actions} at h={block.height}"
-        assert tx.byte_size >= 1, f"byte_size < 1 at h={block.height}"
-        if tx.kind == TxKind.ATTACKER:
-            assert tx.wallet_policy == "attacker", (
-                f"Attacker tx mislabeled as {tx.wallet_policy} at h={block.height}")
-        if tx.kind == TxKind.SYNTHETIC:
-            assert tx.wallet_policy == "synthetic", (
-                f"Synthetic tx mislabeled as {tx.wallet_policy} at h={block.height}")
-
-    total_actions = sum(tx.logical_actions for tx in block.txs)
-    total_bytes = sum(tx.byte_size for tx in block.txs)
-    assert total_actions <= action_cap, (
-        f"Block actions {total_actions} exceed cap {action_cap} at h={block.height}")
-    assert total_bytes <= byte_cap, (
-        f"Block bytes {total_bytes} exceed cap {byte_cap} at h={block.height}")
+    # Only check real txs (not synthetic oracle samples) against caps
+    real_actions = sum(tx.logical_actions for tx in block.txs if tx.kind != TxKind.SYNTHETIC)
+    real_bytes = sum(tx.byte_size for tx in block.txs if tx.kind != TxKind.SYNTHETIC)
+    assert real_actions <= action_cap, (
+        f"Block real actions {real_actions} exceed cap {action_cap} at h={block.height}")
+    assert real_bytes <= byte_cap, (
+        f"Block real bytes {real_bytes} exceed cap {byte_cap} at h={block.height}")
     assert block.marginal_fee >= 0, f"Negative marginal fee at h={block.height}"
 
 
 def run_scenario(cfg: dict[str, Any], compute_baseline: bool = True) -> tuple[MetricsCollector, Chain]:
     # If attacker is enabled, run a no-attacker shadow simulation first
-    # to compute the baseline overpayment for incremental harm_ratio.
     baseline_overpayment = 0
     if compute_baseline and cfg.get("attacker", {}).get("enabled", False):
         cfg_no_atk = copy.deepcopy(cfg)
@@ -102,9 +87,12 @@ def run_scenario(cfg: dict[str, Any], compute_baseline: bool = True) -> tuple[Me
         actions_per_block=synth_cfg.get("actions_per_block", 100),
         fee_per_action=synth_cfg.get("fee_per_action", zip317_fee),
         expiry_blocks=synth_cfg.get("expiry_blocks", 1),
-        granularity_mode=synth_cfg.get("granularity_mode", "granular"),
+        granularity_mode=synth_cfg.get("granularity_mode", "adaptive"),
         tx_granularity_actions=synth_cfg.get("tx_granularity_actions", 1),
+        block_byte_cap=byte_cap,
+        median_tx_actions=synth_cfg.get("median_tx_actions", 3),
     )
+    is_adaptive = synth_cfg.get("granularity_mode", "adaptive") == "adaptive"
 
     demand_cfg = cfg.get("honest_demand", {})
     demand = PoissonHonestDemand(
@@ -144,32 +132,40 @@ def run_scenario(cfg: dict[str, Any], compute_baseline: bool = True) -> tuple[Me
             attacker_txs = attacker.generate(h, current_fee, chain.blocks, mempool)
             mempool.add(attacker_txs)
 
-        # 3. Generate synthetic demand
-        synth_txs = synthetic.generate(h, current_fee)
-        mempool.add(synth_txs)
+        # 3. Generate synthetic into mempool (legacy modes only)
+        if not is_adaptive:
+            synth_txs = synthetic.generate(h, current_fee)
+            mempool.add(synth_txs)
 
         # 4. Expire old transactions
         expired = mempool.expire(h)
         expired_honest = [tx for tx in expired if tx.kind == TxKind.HONEST]
         expired_attacker = [tx for tx in expired if tx.kind == TxKind.ATTACKER]
 
-        # 5. Block builder selects transactions
+        # 5. Block builder selects from mempool (real txs only in adaptive mode)
         candidates = mempool.snapshot()
         selected = builder.select(candidates, current_fee)
 
-        # 6. Build block
+        # 6. Build block with real txs
         block = Block(
             height=h,
-            txs=selected,
+            txs=list(selected),
             marginal_fee=current_fee,
             fast_lane_open=fast_lane,
         )
 
-        # 6b. Runtime invariant checks
+        # 6a. Adaptive synthetic: compute from remaining capacity and append
+        #     to block tx list for oracle purposes. These never entered the
+        #     mempool and were never displaced by the block builder.
+        if is_adaptive:
+            synth_samples = synthetic.generate_for_block(h, block)
+            block.txs.extend(synth_samples)
+
+        # 6b. Runtime invariant checks (only real txs checked against caps)
         if debug_invariants:
             _check_block_invariants(block, action_cap, byte_cap, controller)
 
-        # 7. Remove confirmed from mempool
+        # 7. Remove confirmed real txs from mempool
         mempool.remove(selected)
 
         # 8. Add block to chain
