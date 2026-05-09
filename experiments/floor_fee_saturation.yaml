@@ -1,0 +1,47 @@
+name: floor_fee_saturation
+
+num_blocks: 500
+random_seed: 42
+
+chain:
+  block_action_cap: 1000
+  block_byte_cap: 2000000
+
+zip317:
+  marginal_fee: 5000
+
+controller:
+  type: ComparableMedianController
+  lookback: 50
+  reorg_buffer: 5
+  oracle: median_of_medians
+  oracle_include_synthetic: true
+  quantization: round10
+  base_fee: 5000
+  floor_fee: 5000
+
+block_builder:
+  mode: zip317_weighted_random
+
+synthetic:
+  enabled: true
+  actions_per_block: 100
+  fee_per_action: 5000
+  granularity_mode: granular
+  tx_granularity_actions: 1
+
+honest_demand:
+  arrival_rate: 30
+  mean_actions: 3
+  expiry_blocks: 40
+
+attacker:
+  enabled: true
+  type: FloorFeeSaturationAttacker
+  start_height: 50
+  end_height: 450
+  actions_per_block: 900
+  fee_per_action: 5000
+
+metrics:
+  output_csv: results/floor_fee_saturation.csv
