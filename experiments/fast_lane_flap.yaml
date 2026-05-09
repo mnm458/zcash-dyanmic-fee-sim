@@ -21,7 +21,7 @@ controller:
   block_action_cap: 200
 
 block_builder:
-  mode: highest_fee_per_action
+  mode: zip317_weighted_random
 
 synthetic:
   enabled: true

@@ -195,6 +195,33 @@ class SybilSplitAttacker(AttackerStrategy):
         return txs
 
 
+class FloorFeeSaturationAttacker(AttackerStrategy):
+    """Audit F1: fill blocks with floor-fee txs to cause delays without fee escalation."""
+
+    def __init__(self, *, actions_per_block: int = 900,
+                 fee_per_action: int = 5000,
+                 expiry_blocks: int = 40,
+                 byte_size_per_action: int = 250, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.actions_per_block = actions_per_block
+        self.fee_per_action = fee_per_action
+        self.expiry_blocks = expiry_blocks
+        self.byte_size_per_action = byte_size_per_action
+
+    def _attack(self, height: int, current_fee: int,
+                chain: list[Block], mempool: Mempool) -> list[Tx]:
+        tx = make_tx(
+            kind=TxKind.ATTACKER,
+            created_height=height,
+            expiry_height=height + self.expiry_blocks,
+            logical_actions=self.actions_per_block,
+            byte_size=self.actions_per_block * self.byte_size_per_action,
+            fee_paid=self.fee_per_action * self.actions_per_block,
+            wallet_policy="attacker",
+        )
+        return [tx]
+
+
 ATTACKER_REGISTRY: dict[str, type] = {
     "BurstSpamAttacker": BurstSpamAttacker,
     "MedianPoisoningAttacker": MedianPoisoningAttacker,
@@ -202,4 +229,5 @@ ATTACKER_REGISTRY: dict[str, type] = {
     "FastLaneFlapAttacker": FastLaneFlapAttacker,
     "MinerSelfDealingAttacker": MinerSelfDealingAttacker,
     "SybilSplitAttacker": SybilSplitAttacker,
+    "FloorFeeSaturationAttacker": FloorFeeSaturationAttacker,
 }

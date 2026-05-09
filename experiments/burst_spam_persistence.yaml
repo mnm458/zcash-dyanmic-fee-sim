@@ -14,14 +14,14 @@ controller:
   type: ComparableMedianController
   lookback: 50
   reorg_buffer: 5
-  oracle: action_weighted_median
+  oracle: median_of_medians
   oracle_include_synthetic: true
-  quantization: power_of_10
+  quantization: round10
   base_fee: 5000
   floor_fee: 5000
 
 block_builder:
-  mode: highest_fee_per_action
+  mode: zip317_weighted_random
 
 synthetic:
   enabled: true

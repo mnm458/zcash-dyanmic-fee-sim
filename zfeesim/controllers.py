@@ -8,6 +8,7 @@ from .oracle import (
     compute_oracle_fee,
     get_lookback_blocks,
     quantize_power_of_10,
+    quantize_round10,
     quantize_priority_multipliers,
     PRIORITY_MULTIPLIERS,
 )
@@ -76,7 +77,9 @@ class ComparableMedianController(FeeController):
         raw = compute_oracle_fee(lb, self.oracle_type, self._fee,
                                  include_synthetic=self.include_synthetic)
         self._raw_fee = raw
-        if self.quantization == "power_of_10":
+        if self.quantization == "round10":
+            self._fee = max(self.floor_fee, quantize_round10(raw))
+        elif self.quantization == "power_of_10":
             self._fee = max(self.floor_fee, quantize_power_of_10(raw))
         elif self.quantization == "fixed_priority_multipliers":
             self._fee = max(self.floor_fee, quantize_priority_multipliers(raw, self.base_fee))
@@ -101,7 +104,10 @@ class ComparableMedianWithCapController(ComparableMedianController):
         raw = compute_oracle_fee(lb, "capped_effective_fee_median", self._fee,
                                  include_synthetic=self.include_synthetic)
         self._raw_fee = raw
-        self._fee = max(self.floor_fee, quantize_power_of_10(raw))
+        if self.quantization == "round10":
+            self._fee = max(self.floor_fee, quantize_round10(raw))
+        else:
+            self._fee = max(self.floor_fee, quantize_power_of_10(raw))
 
 
 class ComparableMedianHysteresisController(FeeController):
